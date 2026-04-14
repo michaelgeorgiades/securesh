@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import paramiko; print\\('paramiko ok'\\)\")",
+      "Bash(pip install:*)",
+      "Bash(python -c \"import ast, sys; ast.parse\\(open\\('securesh.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(python -c \"import PyInstaller; print\\('PyInstaller ok'\\)\")",
+      "Bash(where innosetup:*)",
+      "Bash(where iscc:*)",
+      "Read(//c/Program Files \\(x86\\)/Inno Setup 6/**)",
+      "Read(//c/Program Files/Inno Setup 6/**)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('securesh.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(python -m PyInstaller --clean --noconfirm securesh.spec)",
+      "Bash(python:*)"
+    ]
+  }
+}
