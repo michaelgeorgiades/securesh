@@ -759,7 +759,7 @@ _KEY_MAP = {
 }
 
 _ANSI_RE = re.compile(
-    r"\x1b(\[[0-9;]*[A-Za-z]|[()][AB012]|\][^\x07]*\x07|[=>])")
+    r"\x1b(\[[0-9;?]*[A-Za-z]|[()][AB012]|\][^\x07]*\x07|[=>])")
 
 def _strip_ansi(t: str) -> str:
     return _ANSI_RE.sub("", t)
@@ -788,9 +788,12 @@ class SSHTerminal(tk.Frame):
         self.text.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
 
-        self.text.bind("<Key>",      self._on_key)
-        self.text.bind("<Button-1>", lambda _: self.text.focus_set())
-        self.text.bind("<<Paste>>",  self._on_paste)
+        self.text.bind("<Key>",        self._on_key)
+        self.text.bind("<Button-1>",   lambda _: self.text.focus_set())
+        self.text.bind("<<Paste>>",    self._on_paste)
+        self.text.bind("<Control-Shift-C>", self._copy_selection)
+        self.text.bind("<Control-Shift-V>", self._on_paste)
+        self.text.bind("<Button-3>",   self._ctx_menu)
 
         self._open_shell()
 
@@ -844,6 +847,35 @@ class SSHTerminal(tk.Frame):
         except Exception:
             pass
         return "break"
+
+    def _copy_selection(self, _=None):
+        try:
+            text = self.text.get(tk.SEL_FIRST, tk.SEL_LAST)
+            self.clipboard_clear()
+            self.clipboard_append(text)
+        except tk.TclError:
+            pass  # nothing selected
+        return "break"
+
+    def _ctx_menu(self, event):
+        has_sel = bool(self.text.tag_ranges(tk.SEL))
+        m = tk.Menu(self, tearoff=0, font=_UI,
+                    bg=BG, fg=TEXT, activebackground=SEL_BG,
+                    activeforeground=TEXT, relief="flat", bd=1)
+        m.add_command(label="Copy",  command=self._copy_selection,
+                      state="normal" if has_sel else "disabled")
+        m.add_command(label="Paste", command=lambda: self._on_paste(None))
+        m.add_separator()
+        m.add_command(label="Select All", command=self._select_all)
+        m.add_command(label="Clear",      command=self._clear)
+        m.post(event.x_root, event.y_root)
+
+    def _select_all(self):
+        self.text.tag_add(tk.SEL, "1.0", tk.END)
+        return "break"
+
+    def _clear(self):
+        self.text.delete("1.0", tk.END)
 
     def _send(self, data: str):
         try:
