@@ -11,7 +11,10 @@
       "Read(//c/Program Files/Inno Setup 6/**)",
       "Bash(python -c \"import ast; ast.parse\\(open\\('securesh.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
       "Bash(python -m PyInstaller --clean --noconfirm securesh.spec)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(pyinstaller securesh.spec)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

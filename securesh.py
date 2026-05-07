@@ -11,7 +11,6 @@ import threading
 import socket  as _socket
 import queue   as _queue
 import os
-import re
 import stat
 import json
 import time
@@ -758,13 +757,66 @@ _KEY_MAP = {
     "F9": "\x1b[20~","F10":"\x1b[21~","F11":"\x1b[23~","F12":"\x1b[24~",
 }
 
-_ANSI_RE = re.compile(
-    r"\x1b(\[[0-9;?]*[A-Za-z]|[()][AB012]|\][^\x07]*\x07|[=>])")
+# ─────────────────────────────────────────────
+#  VT100 screen — pyte-backed with scrollback
+# ─────────────────────────────────────────────
+import pyte
 
-def _strip_ansi(t: str) -> str:
-    return _ANSI_RE.sub("", t)
+TERM_COLS = 220
+TERM_ROWS = 50
+
+# Standard 16 ANSI colours (VS Code dark-terminal palette)
+_ANSI_COLORS: dict[str, str] = {
+    "black":          "#000000", "red":            "#cd3131",
+    "green":          "#0dbc79", "yellow":         "#e5e510",
+    "blue":           "#2472c8", "magenta":        "#bc3fbc",
+    "cyan":           "#11a8cd", "white":          "#e5e5e5",
+    "bright-black":   "#666666", "bright-red":     "#f14c4c",
+    "bright-green":   "#23d18b", "bright-yellow":  "#f5f543",
+    "bright-blue":    "#3b8eea", "bright-magenta": "#d670d6",
+    "bright-cyan":    "#29b8db", "bright-white":   "#e5e5e5",
+}
+# un-hyphenated aliases (different pyte builds vary)
+_ANSI_COLORS.update({k.replace("-", ""): v for k, v in _ANSI_COLORS.items() if "-" in k})
+_ANSI_PALETTE = list(_ANSI_COLORS.values())[:16]   # indexed 0-15
+
+def _256_color(n: int) -> str:
+    if n < 16:
+        return _ANSI_PALETTE[n]
+    if n < 232:
+        n -= 16
+        b, n = n % 6, n // 6
+        g, r = n % 6, n // 6
+        def lv(x): return 0 if x == 0 else 55 + x * 40
+        return f"#{lv(r):02x}{lv(g):02x}{lv(b):02x}"
+    v = 8 + (n - 232) * 10
+    return f"#{v:02x}{v:02x}{v:02x}"
 
 
+class _TrackingScreen(pyte.Screen):
+    """
+    pyte.Screen subclass that records lines as they scroll off the top,
+    so we can append them as permanent history in the Text widget.
+    """
+    def __init__(self, cols, rows):
+        super().__init__(cols, rows)
+        self.scrolled_off: list[str] = []
+
+    def index(self):
+        """Called when cursor is at the bottom margin and a LF arrives."""
+        # Save the top visible line before it disappears
+        row = self.margins.top if self.margins else 0
+        line = "".join(
+            self.buffer[row][col].data or " "
+            for col in range(self.columns)
+        ).rstrip()
+        self.scrolled_off.append(line)
+        super().index()
+
+
+# ─────────────────────────────────────────────
+#  SSH Terminal widget
+# ─────────────────────────────────────────────
 class SSHTerminal(tk.Frame):
     def __init__(self, parent, transport: paramiko.Transport):
         super().__init__(parent, bg=TERM_BG)
@@ -772,14 +824,22 @@ class SSHTerminal(tk.Frame):
         self._channel   = None
         self._running   = False
 
+        # pyte virtual terminal
+        self._screen = _TrackingScreen(TERM_COLS, TERM_ROWS)
+        self._stream = pyte.ByteStream(self._screen)
+        self._history_lines = 0   # lines permanently written above active screen
+        self._tag_cache: dict[tuple, str] = {}
+        self._prev_cursor_row: int | None = None
+
+        # ── Text widget ──
         self.text = tk.Text(
             self,
             bg=TERM_BG, fg=TERM_FG,
             font=_MONO,
-            insertbackground=TERM_FG,
+            insertwidth=0,
             selectbackground="#264f78",
             selectforeground=TERM_FG,
-            wrap="char", cursor="xterm",
+            wrap="none", cursor="xterm",
             relief="flat", bd=0,
             padx=6, pady=4,
         )
@@ -788,19 +848,52 @@ class SSHTerminal(tk.Frame):
         self.text.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
 
-        self.text.bind("<Key>",        self._on_key)
-        self.text.bind("<Button-1>",   lambda _: self.text.focus_set())
-        self.text.bind("<<Paste>>",    self._on_paste)
+        # Pre-allocate active screen rows in the Text widget
+        self.text.insert("1.0", "\n" * (TERM_ROWS - 1))
+
+        # ── Bindings ──
+        self.text.bind("<Key>",             self._on_key)
+        self.text.bind("<Button-1>",        lambda _: self.text.focus_set())
+        self.text.bind("<<Paste>>",         self._on_paste)
         self.text.bind("<Control-Shift-C>", self._copy_selection)
         self.text.bind("<Control-Shift-V>", self._on_paste)
-        self.text.bind("<Button-3>",   self._ctx_menu)
+        self.text.bind("<Button-3>",        self._ctx_menu)
 
         self._open_shell()
+
+    # ── Colour helpers ────────────────────────
+
+    def _resolve_color(self, raw, default: str) -> str:
+        if raw == "default" or raw is None:
+            return default
+        if isinstance(raw, str):
+            if raw in _ANSI_COLORS:
+                return _ANSI_COLORS[raw]
+            if len(raw) == 6:
+                try:
+                    int(raw, 16)
+                    return f"#{raw}"
+                except ValueError:
+                    pass
+        if isinstance(raw, int):
+            return _256_color(raw)
+        return default
+
+    def _get_tag(self, fg: str, bg: str, bold: bool) -> str:
+        key = (fg, bg, bold)
+        if key not in self._tag_cache:
+            name = f"t{len(self._tag_cache)}"
+            font = (_MONO[0], _MONO[1], "bold") if bold else _MONO
+            self.text.tag_configure(name, foreground=fg, background=bg, font=font)
+            self._tag_cache[key] = name
+        return self._tag_cache[key]
+
+    # ── Shell setup ───────────────────────────
 
     def _open_shell(self):
         try:
             chan = self._transport.open_session()
-            chan.get_pty(term="xterm", width=220, height=50)
+            chan.get_pty(term="xterm", width=TERM_COLS, height=TERM_ROWS)
             chan.invoke_shell()
             chan.settimeout(0.05)
             self._channel = chan
@@ -808,30 +901,119 @@ class SSHTerminal(tk.Frame):
             threading.Thread(target=self._read_loop, daemon=True).start()
             self.text.focus_set()
         except Exception as e:
-            self._append(f"[Terminal error: {e}]\n")
+            self._status(f"[Terminal error: {e}]\n")
+
+    # ── Read loop ─────────────────────────────
 
     def _read_loop(self):
         while self._running:
             try:
                 data = self._channel.recv(4096)
                 if data:
-                    txt = _strip_ansi(
-                        data.decode("utf-8", errors="replace"))
-                    txt = txt.replace("\r\n", "\n").replace("\r", "\n")
-                    self.after(0, self._append, txt)
+                    self._stream.feed(data)
+                    dirty = frozenset(self._screen.dirty)
+                    self._screen.dirty.clear()
+                    scrolled = list(self._screen.scrolled_off)
+                    self._screen.scrolled_off.clear()
+                    self.after(0, self._render, dirty, scrolled)
                 elif self._channel.closed or self._channel.exit_status_ready():
                     break
             except Exception:
                 time.sleep(0.05)
-        self.after(0, self._append, "\n[Session closed]\n")
+        self.after(0, self._status, "\n[Session closed]\n")
 
-    def _append(self, txt: str):
-        self.text.insert("end", txt)
+    # ── Rendering ─────────────────────────────
+
+    def _tw_line(self, screen_row: int) -> int:
+        """Map pyte screen row (0-based) → Text widget line number (1-based)."""
+        return self._history_lines + screen_row + 1
+
+    def _render(self, dirty: frozenset, scrolled: list[str]):
+        # 1. Append scrolled-off lines as permanent history (plain text)
+        if scrolled:
+            insert_at = f"{self._history_lines + 1}.0"
+            self.text.insert(insert_at, "\n".join(scrolled) + "\n")
+            self._history_lines += len(scrolled)
+
+        # 2. Re-render dirty rows + cursor rows (current and previous)
+        cur_y = self._screen.cursor.y
+        cur_x = self._screen.cursor.x
+        rows_to_render = set(dirty) | {cur_y}
+        if self._prev_cursor_row is not None:
+            rows_to_render.add(self._prev_cursor_row)
+
+        for row in rows_to_render:
+            if row >= TERM_ROWS:
+                continue
+            tw = self._tw_line(row)
+
+            end_line = int(self.text.index("end").split(".")[0]) - 1
+            while end_line < tw:
+                self.text.insert("end", "\n")
+                end_line += 1
+
+            self.text.delete(f"{tw}.0", f"{tw}.end")
+
+            # Find last column that needs rendering
+            render_to = -1
+            for c in range(TERM_COLS - 1, -1, -1):
+                ch = self._screen.buffer[row][c]
+                if (ch.data and ch.data.strip()) or ch.bg != "default" or ch.reverse:
+                    render_to = c
+                    break
+            if row == cur_y:
+                render_to = max(render_to, cur_x)
+            if render_to < 0:
+                continue
+
+            # Build colour runs and insert
+            run_chars: list[str] = []
+            run_tag:   str | None = None
+            run_start: int        = 0
+
+            for col in range(render_to + 1):
+                char = self._screen.buffer[row][col]
+                ch   = char.data if char.data else " "
+
+                fg = self._resolve_color(char.fg, TERM_FG)
+                bg = self._resolve_color(char.bg, TERM_BG)
+
+                if char.reverse:
+                    fg, bg = bg, fg
+                if row == cur_y and col == cur_x:   # block cursor
+                    fg, bg = bg, fg
+                    if fg == bg:
+                        fg, bg = TERM_BG, TERM_FG
+
+                tag = self._get_tag(fg, bg, char.bold)
+
+                if tag == run_tag:
+                    run_chars.append(ch)
+                else:
+                    if run_chars:
+                        self.text.insert(f"{tw}.{run_start}", "".join(run_chars), run_tag)
+                    run_chars = [ch]
+                    run_tag   = tag
+                    run_start = col
+
+            if run_chars:
+                self.text.insert(f"{tw}.{run_start}", "".join(run_chars), run_tag)
+
+        self._prev_cursor_row = cur_y
+
+        # 3. Scroll to show the cursor row
+        self.text.see(f"{self._tw_line(cur_y)}.0")
+
+    def _status(self, msg: str):
+        self.text.insert("end", msg)
         self.text.see("end")
+
+    # ── Input ─────────────────────────────────
 
     def _on_key(self, event):
         if not self._channel or self._channel.closed:
             return "break"
+        # Ctrl+letter → control character (Ctrl+C = ^C, etc.)
         if event.state & 0x4:
             if len(event.keysym) == 1 and event.keysym.isalpha():
                 self._send(chr(ord(event.keysym.upper()) - 64))
@@ -841,7 +1023,7 @@ class SSHTerminal(tk.Frame):
             self._send(send)
         return "break"
 
-    def _on_paste(self, _):
+    def _on_paste(self, _=None):
         try:
             self._send(self.clipboard_get())
         except Exception:
@@ -850,11 +1032,11 @@ class SSHTerminal(tk.Frame):
 
     def _copy_selection(self, _=None):
         try:
-            text = self.text.get(tk.SEL_FIRST, tk.SEL_LAST)
+            txt = self.text.get(tk.SEL_FIRST, tk.SEL_LAST)
             self.clipboard_clear()
-            self.clipboard_append(text)
+            self.clipboard_append(txt)
         except tk.TclError:
-            pass  # nothing selected
+            pass
         return "break"
 
     def _ctx_menu(self, event):
@@ -862,26 +1044,33 @@ class SSHTerminal(tk.Frame):
         m = tk.Menu(self, tearoff=0, font=_UI,
                     bg=BG, fg=TEXT, activebackground=SEL_BG,
                     activeforeground=TEXT, relief="flat", bd=1)
-        m.add_command(label="Copy",  command=self._copy_selection,
+        m.add_command(label="Copy",
+                      command=self._copy_selection,
                       state="normal" if has_sel else "disabled")
-        m.add_command(label="Paste", command=lambda: self._on_paste(None))
+        m.add_command(label="Paste",
+                      command=self._on_paste)
         m.add_separator()
         m.add_command(label="Select All", command=self._select_all)
-        m.add_command(label="Clear",      command=self._clear)
+        m.add_command(label="Clear",      command=self._clear_history)
         m.post(event.x_root, event.y_root)
 
     def _select_all(self):
         self.text.tag_add(tk.SEL, "1.0", tk.END)
         return "break"
 
-    def _clear(self):
-        self.text.delete("1.0", tk.END)
+    def _clear_history(self):
+        """Remove history lines, keep the active screen intact."""
+        if self._history_lines:
+            self.text.delete("1.0", f"{self._history_lines + 1}.0")
+            self._history_lines = 0
 
     def _send(self, data: str):
         try:
             self._channel.send(data)
         except Exception:
             pass
+
+    # ── Cleanup ───────────────────────────────
 
     def close(self):
         self._running = False
@@ -1180,6 +1369,7 @@ class SecureSHApp(tk.Tk):
             return
         if dlg.session:
             self.sidebar.upsert(dlg.session)
+            dlg.result["name"] = dlg.session["name"]
         self._launch(dlg.result)
 
     def _connect_with(self, session: dict):
@@ -1189,6 +1379,7 @@ class SecureSHApp(tk.Tk):
             return
         if dlg.session:
             self.sidebar.upsert(dlg.session)
+        dlg.result["name"] = (dlg.session or session).get("name")
         self._launch(dlg.result)
 
     def _launch(self, p: dict):
@@ -1236,8 +1427,9 @@ class SecureSHApp(tk.Tk):
             self.after(0, lambda msg=str(e): self._fail(msg))
             return
 
-        label = f"{p['username']}@{p['host']}:{p['port']}"
-        self.after(0, lambda: self._ok(t, sftp, cwd, label))
+        conn_str  = f"{p['username']}@{p['host']}:{p['port']}"
+        tab_label = p.get("name") or conn_str
+        self.after(0, lambda: self._ok(t, sftp, cwd, tab_label, conn_str))
 
     def _ki_handler(self):
         """Keyboard-interactive handler — shows a GUI dialog, no stdin needed."""
@@ -1257,9 +1449,9 @@ class SecureSHApp(tk.Tk):
                 return [""] * len(fields)
         return handler
 
-    def _ok(self, transport, sftp, cwd, label):
-        self.conn_label.config(text=f"  ● {label}", fg=SUCCESS_FG)
-        self.status_var.set(f"Connected  {label}")
+    def _ok(self, transport, sftp, cwd, tab_label, conn_str):
+        self.conn_label.config(text=f"  ● {tab_label}", fg=SUCCESS_FG)
+        self.status_var.set(f"Connected  {conn_str}")
 
         sub = ttk.Notebook(self.notebook)
 
@@ -1269,7 +1461,7 @@ class SecureSHApp(tk.Tk):
         browser = SFTPBrowser(sub, sftp, cwd, self.status_var)
         sub.add(browser, text="  SFTP  ")
 
-        self.notebook.add(sub, text=f"  {label}  ")
+        self.notebook.add(sub, text=f"  {tab_label}  ")
         self.notebook.select(sub)
 
         tab_id = self.notebook.select()
