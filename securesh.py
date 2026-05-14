@@ -119,10 +119,11 @@ def _apply_theme(root: tk.Tk):
         background=BG2, borderwidth=0, tabmargins=0)
     s.configure("TNotebook.Tab",
         background=BG2, foreground=TEXT2,
-        padding=(14, 7), borderwidth=0, font=_UI)
+        padding=(14, 5), borderwidth=0, font=_UI)
     s.map("TNotebook.Tab",
         background=[("selected", BG),  ("active", HOV_BG)],
         foreground=[("selected", ACCENT)],
+        padding=[("selected", (14, 10))],
         expand=[("selected", [0, 0, 0, 2])])
 
     # ── Treeview (file list) ──
@@ -556,8 +557,8 @@ class SessionsSidebar(tk.Frame):
                              tags=("folder",))
             folder_iids[folder] = fid
 
-        # Insert sessions
-        for s in self._sessions:
+        # Insert sessions (alphabetical within each group)
+        for s in sorted(self._sessions, key=lambda x: x["name"].lower()):
             folder = s.get("folder", "")
             sid    = SESSION_PFX + s["name"]
             parent = folder_iids.get(folder, "") if folder else ""
@@ -854,10 +855,11 @@ class SSHTerminal(tk.Frame):
         # ── Bindings ──
         self.text.bind("<Key>",             self._on_key)
         self.text.bind("<Button-1>",        lambda _: self.text.focus_set())
+        self.text.bind("<ButtonRelease-1>", self._on_mouse_release)
         self.text.bind("<<Paste>>",         self._on_paste)
         self.text.bind("<Control-Shift-C>", self._copy_selection)
         self.text.bind("<Control-Shift-V>", self._on_paste)
-        self.text.bind("<Button-3>",        self._ctx_menu)
+        self.text.bind("<Button-3>",        self._on_right_click)
 
         self._open_shell()
 
@@ -886,6 +888,7 @@ class SSHTerminal(tk.Frame):
             font = (_MONO[0], _MONO[1], "bold") if bold else _MONO
             self.text.tag_configure(name, foreground=fg, background=bg, font=font)
             self._tag_cache[key] = name
+            self.text.tag_raise("sel")  # new tags would outrank sel; keep sel on top
         return self._tag_cache[key]
 
     # ── Shell setup ───────────────────────────
@@ -1039,20 +1042,17 @@ class SSHTerminal(tk.Frame):
             pass
         return "break"
 
-    def _ctx_menu(self, event):
-        has_sel = bool(self.text.tag_ranges(tk.SEL))
-        m = tk.Menu(self, tearoff=0, font=_UI,
-                    bg=BG, fg=TEXT, activebackground=SEL_BG,
-                    activeforeground=TEXT, relief="flat", bd=1)
-        m.add_command(label="Copy",
-                      command=self._copy_selection,
-                      state="normal" if has_sel else "disabled")
-        m.add_command(label="Paste",
-                      command=self._on_paste)
-        m.add_separator()
-        m.add_command(label="Select All", command=self._select_all)
-        m.add_command(label="Clear",      command=self._clear_history)
-        m.post(event.x_root, event.y_root)
+    def _on_mouse_release(self, _=None):
+        try:
+            txt = self.text.get(tk.SEL_FIRST, tk.SEL_LAST)
+            if txt:
+                self.clipboard_clear()
+                self.clipboard_append(txt)
+        except tk.TclError:
+            pass
+
+    def _on_right_click(self, _=None):
+        self._on_paste()
 
     def _select_all(self):
         self.text.tag_add(tk.SEL, "1.0", tk.END)
@@ -1274,6 +1274,7 @@ class SecureSHApp(tk.Tk):
 
         # tab_id → (transport, sftp, terminal)
         self._tab_handles: dict[str, tuple] = {}
+        self._welcome_tab: str | None = None
 
         self._build_menu()
         self._build_titlebar()
@@ -1298,6 +1299,7 @@ class SecureSHApp(tk.Tk):
                                         on_connect=self._connect_with,
                                         on_new=self._connect)
         self.notebook = ttk.Notebook(pane)
+        self.notebook.bind("<Button-3>", self._on_tab_right_click)
         pane.add(self.sidebar,  minsize=180, width=200)
         pane.add(self.notebook, minsize=500)
 
@@ -1327,6 +1329,7 @@ class SecureSHApp(tk.Tk):
 
         self.bind_all("<Control-n>", lambda _: self._connect())
         self.bind_all("<Control-d>", lambda _: self._disconnect_active())
+        self.bind_all("<Control-w>", lambda _: self._disconnect_active())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_titlebar(self):
@@ -1360,6 +1363,7 @@ class SecureSHApp(tk.Tk):
         tk.Label(f, text=f"Default port {DEFAULT_PORT}  ·  Key  {DEFAULT_KEY}",
                  bg=BG, fg=TEXT2, font=_UIsm).pack(pady=4)
         self.notebook.add(f, text="  Welcome  ")
+        self._welcome_tab = self.notebook.tabs()[-1]
 
     # ── Connection flow ───────────────────────────
 
@@ -1453,6 +1457,10 @@ class SecureSHApp(tk.Tk):
         self.conn_label.config(text=f"  ● {tab_label}", fg=SUCCESS_FG)
         self.status_var.set(f"Connected  {conn_str}")
 
+        if self._welcome_tab and self._welcome_tab in self.notebook.tabs():
+            self.notebook.forget(self._welcome_tab)
+            self._welcome_tab = None
+
         sub = ttk.Notebook(self.notebook)
 
         terminal = SSHTerminal(sub, transport)
@@ -1483,19 +1491,39 @@ class SecureSHApp(tk.Tk):
         else:
             self.conn_label.config(text="No active session", fg=TEXT2)
 
+    def _on_tab_right_click(self, event):
+        try:
+            idx = self.notebook.index(f"@{event.x},{event.y}")
+        except tk.TclError:
+            return
+        tab_id = self.notebook.tabs()[idx]
+        if tab_id not in self._tab_handles:
+            return
+        label = self.notebook.tab(tab_id, "text").strip()
+        m = tk.Menu(self, tearoff=0, font=_UI,
+                    bg=BG, fg=TEXT, activebackground=SEL_BG,
+                    activeforeground=TEXT, relief="flat", bd=1)
+        m.add_command(label=f"Close  '{label}'",
+                      command=lambda t=tab_id: self._close_tab(t))
+        m.post(event.x_root, event.y_root)
+
+    def _close_tab(self, tab_id: str):
+        if tab_id in self._tab_handles:
+            transport, sftp, terminal = self._tab_handles.pop(tab_id)
+            terminal.close()
+            for obj in (sftp, transport):
+                try:  obj.close()
+                except Exception: pass
+        self.notebook.forget(tab_id)
+        self.status_var.set("Disconnected.")
+        if not self._tab_handles:
+            self.conn_label.config(text="No active session", fg=TEXT2)
+
     def _disconnect_active(self):
         tab = self.notebook.select()
         if tab not in self._tab_handles:
             return
-        transport, sftp, terminal = self._tab_handles.pop(tab)
-        terminal.close()
-        for obj in (sftp, transport):
-            try:  obj.close()
-            except Exception: pass
-        self.notebook.forget(tab)
-        self.status_var.set("Disconnected.")
-        if not self._tab_handles:
-            self.conn_label.config(text="No active session", fg=TEXT2)
+        self._close_tab(tab)
 
     def _on_close(self):
         for transport, sftp, terminal in self._tab_handles.values():
