@@ -141,7 +141,7 @@ def _apply_theme(root: tk.Tk):
     # ── Sidebar Treeview ──
     s.configure("Sidebar.Treeview",
         background=SIDEBAR_BG, fieldbackground=SIDEBAR_BG,
-        foreground=TEXT, rowheight=28, font=_UI,
+        foreground=TEXT, rowheight=22, font=_UI,
         borderwidth=0, relief="flat", indent=14)
     s.map("Sidebar.Treeview",
         background=[("selected", ACCENT)],
@@ -474,6 +474,12 @@ class SessionsSidebar(tk.Frame):
                   activebackground=SIDEBAR_BG, activeforeground=ACCENT_HOV,
                   command=self.on_new).pack(side="right")
 
+        # Search box
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", lambda *_: self._repopulate())
+        ttk.Entry(self, textvariable=self._search_var,
+                  font=_UIsm).pack(fill="x", padx=8, pady=(0, 4))
+
         # Treeview
         tv_frame = tk.Frame(self, bg=SIDEBAR_BG)
         tv_frame.pack(fill="both", expand=True, padx=4, pady=2)
@@ -537,6 +543,8 @@ class SessionsSidebar(tk.Frame):
     # ── Tree population ──────────────────────────
 
     def _repopulate(self):
+        query = self._search_var.get().lower().strip() if hasattr(self, "_search_var") else ""
+
         # Remember which folders were open
         open_folders = {
             iid for iid in self.tree.get_children()
@@ -544,21 +552,25 @@ class SessionsSidebar(tk.Frame):
         }
         self.tree.delete(*self.tree.get_children())
 
-        folders = self._folders()
+        visible = sorted(self._sessions, key=lambda x: x["name"].lower())
+        if query:
+            visible = [s for s in visible if query in s["name"].lower()]
+
+        # Only show folders that contain at least one visible session
+        folders = sorted({s["folder"] for s in visible if s.get("folder")})
 
         # Insert folder nodes
         folder_iids: dict[str, str] = {}
         for folder in folders:
             fid = FOLDER_PFX + folder
-            was_open = fid in open_folders or True   # default open
             self.tree.insert("", "end", iid=fid,
                              text=f"  📁  {folder}",
-                             open=was_open,
+                             open=True,
                              tags=("folder",))
             folder_iids[folder] = fid
 
         # Insert sessions (alphabetical within each group)
-        for s in sorted(self._sessions, key=lambda x: x["name"].lower()):
+        for s in visible:
             folder = s.get("folder", "")
             sid    = SESSION_PFX + s["name"]
             parent = folder_iids.get(folder, "") if folder else ""
@@ -854,6 +866,7 @@ class SSHTerminal(tk.Frame):
 
         # ── Bindings ──
         self.text.bind("<Key>",             self._on_key)
+        self.text.bind("<Tab>",             self._on_key)   # explicit: beats Text class <Tab> insert
         self.text.bind("<Button-1>",        lambda _: self.text.focus_set())
         self.text.bind("<ButtonRelease-1>", self._on_mouse_release)
         self.text.bind("<<Paste>>",         self._on_paste)
