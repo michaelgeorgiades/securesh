@@ -863,6 +863,9 @@ class SSHTerminal(tk.Frame):
 
         # Pre-allocate active screen rows in the Text widget
         self.text.insert("1.0", "\n" * (TERM_ROWS - 1))
+        # Disable editing so the Text class never inserts/deletes on keypress;
+        # our instance bindings still fire, and we re-enable briefly for rendering.
+        self.text.configure(state="disabled")
 
         # ── Bindings ──
         self.text.bind("<Key>",             self._on_key)
@@ -945,6 +948,7 @@ class SSHTerminal(tk.Frame):
         return self._history_lines + screen_row + 1
 
     def _render(self, dirty: frozenset, scrolled: list[str]):
+        self.text.configure(state="normal")
         # 1. Append scrolled-off lines as permanent history (plain text)
         if scrolled:
             insert_at = f"{self._history_lines + 1}.0"
@@ -1019,10 +1023,13 @@ class SSHTerminal(tk.Frame):
 
         # 3. Scroll to show the cursor row
         self.text.see(f"{self._tw_line(cur_y)}.0")
+        self.text.configure(state="disabled")
 
     def _status(self, msg: str):
+        self.text.configure(state="normal")
         self.text.insert("end", msg)
         self.text.see("end")
+        self.text.configure(state="disabled")
 
     # ── Input ─────────────────────────────────
 
@@ -1074,7 +1081,9 @@ class SSHTerminal(tk.Frame):
     def _clear_history(self):
         """Remove history lines, keep the active screen intact."""
         if self._history_lines:
+            self.text.configure(state="normal")
             self.text.delete("1.0", f"{self._history_lines + 1}.0")
+            self.text.configure(state="disabled")
             self._history_lines = 0
 
     def _send(self, data: str):
