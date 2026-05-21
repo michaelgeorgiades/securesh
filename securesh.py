@@ -816,16 +816,14 @@ class _TrackingScreen(pyte.Screen):
         self.scrolled_off: list[str] = []
 
     def index(self):
-        """Called by pyte on LF/ESC-D; only captures history when a scroll actually occurs."""
-        margins = self.margins
-        bottom = margins.bottom if margins else (self.lines - 1)
-        if self.cursor.y == bottom:
-            top = margins.top if margins else 0
-            line = "".join(
-                self.buffer[top][col].data or " "
-                for col in range(self.columns)
-            ).rstrip()
-            self.scrolled_off.append(line)
+        """Called when cursor is at the bottom margin and a LF arrives."""
+        # Save the top visible line before it disappears
+        row = self.margins.top if self.margins else 0
+        line = "".join(
+            self.buffer[row][col].data or " "
+            for col in range(self.columns)
+        ).rstrip()
+        self.scrolled_off.append(line)
         super().index()
 
 
@@ -842,7 +840,7 @@ class SSHTerminal(tk.Frame):
         # pyte virtual terminal
         self._screen = _TrackingScreen(TERM_COLS, TERM_ROWS)
         self._stream = pyte.ByteStream(self._screen)
-        self._history_lines = TERM_ROWS - 1   # start active screen below blank scrollback padding
+        self._history_lines = 0   # lines permanently written above active screen
         self._tag_cache: dict[tuple, str] = {}
         self._prev_cursor_row: int | None = None
 
@@ -863,12 +861,8 @@ class SSHTerminal(tk.Frame):
         self.text.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
 
-        # Virtual history padding (TERM_ROWS-1 lines) + pre-allocated active screen
-        # (TERM_ROWS-1 lines) = 2*(TERM_ROWS-1) blank lines total.  The padding
-        # ensures the text widget is taller than any normal viewport so that
-        # text.see(cursor_line) is always forced to scroll and pins the cursor
-        # to the bottom rather than leaving it near the top.
-        self.text.insert("1.0", "\n" * (2 * TERM_ROWS - 2))
+        # Pre-allocate active screen rows in the Text widget
+        self.text.insert("1.0", "\n" * (TERM_ROWS - 1))
         # Disable editing so the Text class never inserts/deletes on keypress;
         # our instance bindings still fire, and we re-enable briefly for rendering.
         self.text.configure(state="disabled")
@@ -914,21 +908,6 @@ class SSHTerminal(tk.Frame):
         return self._tag_cache[key]
 
     # ── Shell setup ───────────────────────────
-
-    def _scroll_to_bottom(self):
-        """Pin the cursor row to the bottom of the viewport."""
-        if self.text.winfo_height() <= 1:
-            self.after(30, self._scroll_to_bottom)
-            return
-        cur_y = self._screen.cursor.y
-        target = self._tw_line(cur_y)
-        total_lines = max(1, int(self.text.index("end").split(".")[0]) - 1)
-        self.text.see(f"{target}.0")
-        top_frac, bot_frac = self.text.yview()
-        page_frac = bot_frac - top_frac
-        cursor_frac = (target - 1) / total_lines
-        new_top = max(0.0, cursor_frac - page_frac + 1.0 / total_lines)
-        self.text.yview_moveto(new_top)
 
     def _open_shell(self):
         try:
@@ -1042,9 +1021,9 @@ class SSHTerminal(tk.Frame):
 
         self._prev_cursor_row = cur_y
 
-        # 3. Scroll so the cursor line lands at the bottom of the viewport
+        # 3. Scroll to show the cursor row
+        self.text.see(f"{self._tw_line(cur_y)}.0")
         self.text.configure(state="disabled")
-        self._scroll_to_bottom()
 
     def _status(self, msg: str):
         self.text.configure(state="normal")
