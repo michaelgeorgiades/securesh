@@ -1,10 +1,9 @@
-# PyInstaller build output
+# Build output
 build/
 dist/
-*.spec.bak
-
-# Installer output
 installer_output/
+build_log.txt
+*.spec.bak
 
 # Python cache
 __pycache__/

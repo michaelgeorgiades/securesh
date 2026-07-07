@@ -46,7 +46,30 @@
       "PowerShell(Start-Sleep -Seconds 3; Test-Path \"C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\\\\dist\\\\SecureSH.exe\"; cmd /c \"dir C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\\\\dist\\\\SecureSH.exe\")",
       "PowerShell(Copy-Item *)",
       "PowerShell(Start-Process \"C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\\\\dist\\\\SecureSH.exe\" -Verb \"open\")",
-      "PowerShell(reg query *)"
+      "PowerShell(reg query *)",
+      "Bash(git revert *)",
+      "PowerShell(python --version 2>&1)",
+      "PowerShell(python -c \"import PyInstaller; print\\(PyInstaller.__version__\\)\" 2>&1)",
+      "PowerShell(Test-Path *)",
+      "PowerShell([System.IO.Directory]::GetFiles\\(\"C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\\\\dist\"\\))",
+      "PowerShell(cmd /c \"dir C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\\\\dist 2>&1\")",
+      "PowerShell(& \"C:\\\\Users\\\\me\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python3.exe\" -c \"import PyInstaller; print\\(PyInstaller.__version__\\)\" 2>&1)",
+      "PowerShell(& \"C:\\\\Users\\\\me\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python3.exe\" -c \"import pefile; print\\(pefile.__version__\\)\" 2>&1)",
+      "PowerShell(& \"C:\\\\Users\\\\me\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python3.exe\" -c \"import paramiko; print\\(paramiko.__version__\\)\" 2>&1)",
+      "PowerShell(python -m nuitka --version 2>&1)",
+      "PowerShell(winget *)",
+      "PowerShell(python -m pip install nuitka --quiet 2>&1; python -m nuitka --version 2>&1)",
+      "PowerShell(Stop-Process *)",
+      "PowerShell(cmd /c \"dir C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\\\\dist\\\\ 2>&1\")",
+      "PowerShell(cmd /c \"dir C:\\\\Users\\\\me\\\\AppData\\\\Local\\\\Nuitka\\\\Nuitka\\\\Cache 2>&1\")",
+      "PowerShell(cmd /c \"dir C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\\\\dist\\\\ /s /b 2>&1\")",
+      "PowerShell(cmd /c \"dir C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\\\\dist\\\\ /b 2>&1\")",
+      "PowerShell(cmd /c \"dir C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\\\\dist\\\\securesh.dist\\\\ /b 2>&1\")",
+      "PowerShell(cmd /c \"dir C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\\\\dist\\\\securesh.dist 2>&1\")",
+      "PowerShell(Get-WindowsOptionalFeature *)",
+      "PowerShell(git *)",
+      "PowerShell(git -C \"C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH\" commit -m $msg 2>&1)",
+      "PowerShell(cmd /c \"dir C:\\\\Users\\\\me\\\\Downloads\\\\Projects\\\\SecureSH /b 2>&1\")"
     ]
   }
 }
