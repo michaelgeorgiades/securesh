@@ -55,6 +55,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,              # set to 'securesh.ico' if you add an icon
+    icon='5261269.ico',
     version=None,
 )

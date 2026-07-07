@@ -6,6 +6,7 @@
 #define AppPublisher "SecureSH"
 #define AppExeName   "SecureSH.exe"
 #define BuildDir     "dist"
+#define AppIcon      "5261269.ico"
 
 [Setup]
 AppId={{A1B2C3D4-E5F6-7890-ABCD-EF1234567890}
@@ -22,6 +23,7 @@ SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
+SetupIconFile={#AppIcon}
 UninstallDisplayIcon={app}\{#AppExeName}
 ArchitecturesInstallIn64BitMode=x64compatible
 

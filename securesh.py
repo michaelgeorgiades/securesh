@@ -816,14 +816,23 @@ class _TrackingScreen(pyte.Screen):
         self.scrolled_off: list[str] = []
 
     def index(self):
-        """Called when cursor is at the bottom margin and a LF arrives."""
-        # Save the top visible line before it disappears
-        row = self.margins.top if self.margins else 0
-        line = "".join(
-            self.buffer[row][col].data or " "
-            for col in range(self.columns)
-        ).rstrip()
-        self.scrolled_off.append(line)
+        """Called by pyte on every LF — but only actually scrolls when the
+        cursor sits on the bottom margin.  Capture the departing line only
+        when a real scroll is about to happen AND the scroll region spans the
+        full screen (shell output, not an ncurses app's internal viewport)."""
+        if self.margins is None:
+            top, bottom = 0, self.lines - 1
+        else:
+            top, bottom = self.margins.top, self.margins.bottom
+
+        full_screen = (top == 0 and bottom == self.lines - 1)
+
+        if full_screen and self.cursor.y == bottom:
+            line = "".join(
+                self.buffer[0][col].data or " "
+                for col in range(self.columns)
+            ).rstrip()
+            self.scrolled_off.append(line)
         super().index()
 
 
@@ -843,6 +852,12 @@ class SSHTerminal(tk.Frame):
         self._history_lines = 0   # lines permanently written above active screen
         self._tag_cache: dict[tuple, str] = {}
         self._prev_cursor_row: int | None = None
+
+        # Render coalescing — prevents queue build-up when holding keys
+        self._render_pending = False
+        self._pending_dirty: set[int] = set()
+        self._pending_scrolled: list[str] = []
+        self._screen_lock = threading.Lock()
 
         # ── Text widget ──
         self.text = tk.Text(
@@ -930,11 +945,14 @@ class SSHTerminal(tk.Frame):
                 data = self._channel.recv(4096)
                 if data:
                     self._stream.feed(data)
-                    dirty = frozenset(self._screen.dirty)
-                    self._screen.dirty.clear()
-                    scrolled = list(self._screen.scrolled_off)
-                    self._screen.scrolled_off.clear()
-                    self.after(0, self._render, dirty, scrolled)
+                    with self._screen_lock:
+                        self._pending_dirty.update(self._screen.dirty)
+                        self._screen.dirty.clear()
+                        self._pending_scrolled.extend(self._screen.scrolled_off)
+                        self._screen.scrolled_off.clear()
+                    if not self._render_pending:
+                        self._render_pending = True
+                        self.after(0, self._do_render)
                 elif self._channel.closed or self._channel.exit_status_ready():
                     break
             except Exception:
@@ -942,6 +960,16 @@ class SSHTerminal(tk.Frame):
         self.after(0, self._status, "\n[Session closed]\n")
 
     # ── Rendering ─────────────────────────────
+
+    def _do_render(self):
+        """Drain the accumulated dirty/scrolled state and render once."""
+        with self._screen_lock:
+            dirty = frozenset(self._pending_dirty)
+            self._pending_dirty.clear()
+            scrolled = list(self._pending_scrolled)
+            self._pending_scrolled.clear()
+        self._render_pending = False
+        self._render(dirty, scrolled)
 
     def _tw_line(self, screen_row: int) -> int:
         """Map pyte screen row (0-based) → Text widget line number (1-based)."""
@@ -958,9 +986,17 @@ class SSHTerminal(tk.Frame):
         # 2. Re-render dirty rows + cursor rows (current and previous)
         cur_y = self._screen.cursor.y
         cur_x = self._screen.cursor.x
-        rows_to_render = set(dirty) | {cur_y}
-        if self._prev_cursor_row is not None:
-            rows_to_render.add(self._prev_cursor_row)
+
+        # When a full-screen app (nano, vim, etc.) has a scroll region active,
+        # redraw every row. Relying solely on pyte's dirty set leaves stale
+        # widget content whenever scrolling uses delete_lines or index with
+        # margins — the safest fix is a complete repaint in that mode.
+        if self._screen.margins is not None:
+            rows_to_render = set(range(TERM_ROWS))
+        else:
+            rows_to_render = set(dirty) | {cur_y}
+            if self._prev_cursor_row is not None:
+                rows_to_render.add(self._prev_cursor_row)
 
         for row in rows_to_render:
             if row >= TERM_ROWS:
@@ -1097,6 +1133,8 @@ class SSHTerminal(tk.Frame):
     def close(self):
         self._running = False
         if self._channel:
+            try:  self._channel.send("\x04")   # EOF → shell exits cleanly, saves history
+            except Exception: pass
             try:  self._channel.close()
             except Exception: pass
 

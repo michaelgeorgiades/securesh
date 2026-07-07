@@ -1,0 +1,41 @@
+name: Build Installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install pyinstaller paramiko pyte cryptography bcrypt
+
+      - name: Build EXE with PyInstaller
+        run: python -m PyInstaller securesh.spec
+
+      - name: Install Inno Setup
+        run: |
+          choco install innosetup --yes --no-progress
+        shell: cmd
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+        shell: pwsh
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SecureSH-Installer
+          path: installer_output\SecureSH-1.0.0-Setup.exe
+          retention-days: 30
