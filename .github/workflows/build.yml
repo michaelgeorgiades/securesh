@@ -18,19 +18,27 @@ jobs:
           python-version: "3.13"
 
       - name: Install dependencies
-        run: pip install pyinstaller paramiko pyte cryptography bcrypt
+        run: pip install nuitka paramiko pyte cryptography bcrypt ordered-set
 
-      - name: Build EXE with PyInstaller
-        run: python -m PyInstaller securesh.spec
+      - name: Build EXE with Nuitka
+        run: >
+          python -m nuitka
+          --standalone
+          --onefile
+          --windows-console-mode=disable
+          --enable-plugin=tk-inter
+          --windows-icon-from-ico=5261269.ico
+          --output-filename=SecureSH.exe
+          --output-dir=dist
+          --assume-yes-for-downloads
+          securesh.py
 
       - name: Install Inno Setup
-        run: |
-          choco install innosetup --yes --no-progress
+        run: choco install innosetup --yes --no-progress
         shell: cmd
 
       - name: Build installer
-        run: |
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+        run: '& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss'
         shell: pwsh
 
       - name: Upload installer artifact
