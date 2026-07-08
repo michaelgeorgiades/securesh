@@ -13,37 +13,162 @@ import queue   as _queue
 import os
 import stat
 import json
+import sys
+import subprocess
 import time
 import paramiko
 
 # ─────────────────────────────────────────────
-#  Theme
+#  Themes
 # ─────────────────────────────────────────────
-BG          = "#ffffff"
-BG2         = "#f7f7f7"
-SIDEBAR_BG  = "#f0f2f5"
-ACCENT      = "#0078d4"
-ACCENT_HOV  = "#106ebe"
-ACCENT_ACT  = "#005a9e"
-TEXT        = "#1b1b1b"
-TEXT2       = "#6e6e6e"
-BORDER      = "#dde1e6"
-SEL_BG      = "#d0e7f8"
-HOV_BG      = "#e8f2fb"
-SUCCESS_FG  = "#107c10"
-WARN_FG     = "#ca5010"
-ERR_FG      = "#c42b1c"
-TERM_BG     = "#1e1e1e"
-TERM_FG     = "#d4d4d4"
+# Each theme is a fully self-contained palette + font + style bundle.
+# "classic" STYLE = solid filled accent buttons / selection blocks
+# (the original Fluent-ish look). "glow" STYLE = outline buttons that
+# invert to a solid fill on hover — a terminal "select to activate" feel,
+# used by the darker/techier themes.
+THEMES: dict[str, dict] = {
+    "Light (Default)": dict(
+        BG="#ffffff", BG2="#f7f7f7", SIDEBAR_BG="#f0f2f5", FIELD_BG="#ffffff",
+        ACCENT="#0078d4", ACCENT_HOV="#106ebe", ACCENT_ACT="#005a9e", ACCENT_TEXT="#ffffff",
+        TEXT="#1b1b1b", TEXT2="#6e6e6e", BORDER="#dde1e6",
+        SEL_BG="#d0e7f8", HOV_BG="#e8f2fb",
+        SUCCESS_FG="#107c10", WARN_FG="#ca5010", ERR_FG="#c42b1c",
+        INFO_BG="#e8f4fb", INFO_BORDER="#b3d7f0",
+        TERM_BG="#1e1e1e", TERM_FG="#d4d4d4", TERM_SEL_BG="#264f78",
+        MONO=("Consolas", 10), LABEL=("Segoe UI", 8), LABELB=("Segoe UI", 8, "bold"),
+        STYLE="classic", WELCOME_CURSOR=False,
+        DANGER_HOVER_BG="#fde7e9", DANGER_PRESS_BG="#f8d0d3",
+        GRADIENT_START="#0078d4", GRADIENT_END="#0078d4",
+    ),
+    "Midnight Cyan": dict(
+        BG="#0a0e17", BG2="#111827", SIDEBAR_BG="#0d1420", FIELD_BG="#0f1621",
+        ACCENT="#22d3ee", ACCENT_HOV="#67e8f9", ACCENT_ACT="#0891b2", ACCENT_TEXT="#04141a",
+        TEXT="#e6edf3", TEXT2="#7d8b9c", BORDER="#232c3d",
+        SEL_BG="#163647", HOV_BG="#141c2b",
+        SUCCESS_FG="#3fb950", WARN_FG="#e3b341", ERR_FG="#f85149",
+        INFO_BG="#0f2630", INFO_BORDER="#1c4a5c",
+        TERM_BG="#0a0e17", TERM_FG="#c9d1d9", TERM_SEL_BG="#163647",
+        MONO=("Cascadia Mono", 10), LABEL=("Cascadia Mono", 8), LABELB=("Cascadia Mono", 8, "bold"),
+        STYLE="glow", WELCOME_CURSOR=True,
+        DANGER_HOVER_BG="#3b1219", DANGER_PRESS_BG="#8f1f1a",
+        GRADIENT_START="#22d3ee", GRADIENT_END="#22d3ee",
+    ),
+    "Matrix Green": dict(
+        BG="#060a07", BG2="#0d130e", SIDEBAR_BG="#080c09", FIELD_BG="#0a100b",
+        ACCENT="#39ff14", ACCENT_HOV="#8aff6b", ACCENT_ACT="#1a8f00", ACCENT_TEXT="#031a08",
+        TEXT="#dbe8de", TEXT2="#7c9284", BORDER="#1f2e24",
+        SEL_BG="#123322", HOV_BG="#0f1912",
+        SUCCESS_FG="#4ade80", WARN_FG="#e3b341", ERR_FG="#f85149",
+        INFO_BG="#08150c", INFO_BORDER="#1d4a2c",
+        TERM_BG="#060a07", TERM_FG="#c7d6cb", TERM_SEL_BG="#123322",
+        MONO=("Cascadia Mono", 10), LABEL=("Cascadia Mono", 8), LABELB=("Cascadia Mono", 8, "bold"),
+        STYLE="glow", WELCOME_CURSOR=True,
+        DANGER_HOVER_BG="#3b1219", DANGER_PRESS_BG="#8f1f1a",
+        GRADIENT_START="#39ff14", GRADIENT_END="#39ff14",
+    ),
+    "Cyberpunk": dict(
+        BG="#0a0a0a", BG2="#161616", SIDEBAR_BG="#0c0c0c", FIELD_BG="#131313",
+        ACCENT="#ff6a00", ACCENT_HOV="#ffab5e", ACCENT_ACT="#cc5500", ACCENT_TEXT="#170900",
+        TEXT="#e8e6e3", TEXT2="#8a8781", BORDER="#2b2b2b",
+        SEL_BG="#3a2210", HOV_BG="#1c1c1c",
+        SUCCESS_FG="#4ade80", WARN_FG="#ffd166", ERR_FG="#ff4d4d",
+        INFO_BG="#1a120a", INFO_BORDER="#4a2f10",
+        TERM_BG="#0a0a0a", TERM_FG="#d8d5cf", TERM_SEL_BG="#3a2210",
+        MONO=("Cascadia Mono", 10), LABEL=("Cascadia Mono", 8), LABELB=("Cascadia Mono", 8, "bold"),
+        STYLE="glow", WELCOME_CURSOR=True,
+        DANGER_HOVER_BG="#3d1010", DANGER_PRESS_BG="#7a1f1f",
+        GRADIENT_START="#ff6a00", GRADIENT_END="#ff6a00",
+    ),
+    "Slate Graphite": dict(
+        BG="#111318", BG2="#181b21", SIDEBAR_BG="#0e1015", FIELD_BG="#1b1e25",
+        ACCENT="#6ea8fe", ACCENT_HOV="#9dc2ff", ACCENT_ACT="#3d7de0", ACCENT_TEXT="#0a0e17",
+        TEXT="#e3e5e8", TEXT2="#8a8f98", BORDER="#2a2e37",
+        SEL_BG="#22293a", HOV_BG="#1d2129",
+        SUCCESS_FG="#4ade80", WARN_FG="#e3b341", ERR_FG="#f87171",
+        INFO_BG="#161c2b", INFO_BORDER="#2d3a55",
+        TERM_BG="#111318", TERM_FG="#d7dae0", TERM_SEL_BG="#22293a",
+        MONO=("Cascadia Mono", 10), LABEL=("Segoe UI", 8), LABELB=("Segoe UI", 8, "bold"),
+        STYLE="glow", WELCOME_CURSOR=False,
+        DANGER_HOVER_BG="#3a1616", DANGER_PRESS_BG="#6a2323",
+        GRADIENT_START="#6ea8fe", GRADIENT_END="#6ea8fe",
+    ),
+    "Aurora": dict(
+        BG="#0b0713", BG2="#140f22", SIDEBAR_BG="#0d0918", FIELD_BG="#120c1f",
+        # ACCENT is deliberately brighter than a true 50/50 blend of
+        # GRADIENT_START/END — the muted midpoint blue looked "hollow"/
+        # broken when used as small bold ttk-button text (ClearType's
+        # subpixel color fringing overwhelms a low-luminance color at
+        # that size). The literal gradient bars/text still use the true
+        # violet->cyan endpoints below, which are big enough not to have
+        # this problem.
+        ACCENT="#8fa8ff", ACCENT_HOV="#c0cdff", ACCENT_ACT="#5a72d1", ACCENT_TEXT="#0a0713",
+        TEXT="#ece7f5", TEXT2="#8b7fa0", BORDER="#2a2140",
+        SEL_BG="#241a3d", HOV_BG="#191228",
+        SUCCESS_FG="#4ade80", WARN_FG="#ffb020", ERR_FG="#ff5470",
+        INFO_BG="#160f26", INFO_BORDER="#3d2a5c",
+        TERM_BG="#0b0713", TERM_FG="#ded4ec", TERM_SEL_BG="#2a1f4a",
+        MONO=("Cascadia Mono", 10), LABEL=("Cascadia Mono", 8), LABELB=("Cascadia Mono", 8, "bold"),
+        STYLE="gradient", WELCOME_CURSOR=True,
+        DANGER_HOVER_BG="#3d0f2a", DANGER_PRESS_BG="#7a1f4f",
+        GRADIENT_START="#7c3aed", GRADIENT_END="#22d3ee",
+    ),
+}
+DEFAULT_THEME = "Light (Default)"
+CURRENT_THEME = DEFAULT_THEME
 
 _UI   = ("Segoe UI", 9)
 _UIsm = ("Segoe UI", 8)
 _UIb  = ("Segoe UI", 9,  "bold")
 _UIh  = ("Segoe UI", 11, "bold")
-_MONO = ("Consolas", 10)
+
+
+def _activate_theme(name: str):
+    """Populate the module-level color/font globals from THEMES[name].
+
+    Must run before any widget is constructed — everything else in this
+    file reads these names live (inside method bodies), so reassigning
+    them here is enough to make the whole app pick up a new palette,
+    provided no widgets exist yet from a previous theme.
+    """
+    global BG, BG2, SIDEBAR_BG, FIELD_BG
+    global ACCENT, ACCENT_HOV, ACCENT_ACT, ACCENT_TEXT
+    global TEXT, TEXT2, BORDER, SEL_BG, HOV_BG
+    global SUCCESS_FG, WARN_FG, ERR_FG
+    global INFO_BG, INFO_BORDER
+    global TERM_BG, TERM_FG, TERM_SEL_BG
+    global _MONO, _LABEL, _LABELb
+    global _THEME_STYLE, _WELCOME_CURSOR
+    global DANGER_HOVER_BG, DANGER_PRESS_BG
+    global GRADIENT_START, GRADIENT_END
+    global CURRENT_THEME
+
+    t = THEMES.get(name, THEMES[DEFAULT_THEME])
+    CURRENT_THEME = name if name in THEMES else DEFAULT_THEME
+
+    BG, BG2, SIDEBAR_BG, FIELD_BG = t["BG"], t["BG2"], t["SIDEBAR_BG"], t["FIELD_BG"]
+    ACCENT, ACCENT_HOV, ACCENT_ACT, ACCENT_TEXT = (
+        t["ACCENT"], t["ACCENT_HOV"], t["ACCENT_ACT"], t["ACCENT_TEXT"])
+    TEXT, TEXT2, BORDER = t["TEXT"], t["TEXT2"], t["BORDER"]
+    SEL_BG, HOV_BG = t["SEL_BG"], t["HOV_BG"]
+    SUCCESS_FG, WARN_FG, ERR_FG = t["SUCCESS_FG"], t["WARN_FG"], t["ERR_FG"]
+    INFO_BG, INFO_BORDER = t["INFO_BG"], t["INFO_BORDER"]
+    TERM_BG, TERM_FG, TERM_SEL_BG = t["TERM_BG"], t["TERM_FG"], t["TERM_SEL_BG"]
+    _MONO, _LABEL, _LABELb = t["MONO"], t["LABEL"], t["LABELB"]
+    _THEME_STYLE = t["STYLE"]
+    _WELCOME_CURSOR = t["WELCOME_CURSOR"]
+    DANGER_HOVER_BG, DANGER_PRESS_BG = t["DANGER_HOVER_BG"], t["DANGER_PRESS_BG"]
+    GRADIENT_START, GRADIENT_END = t["GRADIENT_START"], t["GRADIENT_END"]
+
+
+_activate_theme(DEFAULT_THEME)
 
 
 def _apply_theme(root: tk.Tk):
+    # "gradient" reuses the glow (outline/invert) ttk styling everywhere a
+    # true multi-color gradient isn't feasible in ttk; the gradient itself
+    # is layered on top at a few specific spots via the Gradient* widgets.
+    glow = (_THEME_STYLE in ("glow", "gradient"))
+
     s = ttk.Style(root)
     s.theme_use("clam")
     root.configure(bg=BG)
@@ -60,59 +185,109 @@ def _apply_theme(root: tk.Tk):
 
     # ── Labels ──
     s.configure("TLabel",       background=BG,         foreground=TEXT)
-    s.configure("Dim.TLabel",   background=BG,         foreground=TEXT2,  font=_UIsm)
+    s.configure("Dim.TLabel",   background=BG,         foreground=TEXT2,  font=_LABEL)
     s.configure("Sidebar.TLabel", background=SIDEBAR_BG, foreground=TEXT)
-    s.configure("SHdr.TLabel",  background=SIDEBAR_BG, foreground=TEXT2,
-                font=("Segoe UI", 8, "bold"))
+    s.configure("SHdr.TLabel",  background=SIDEBAR_BG,
+                foreground=(ACCENT if glow else TEXT2),
+                font=_LABELb)
     s.configure("Success.TLabel", background=BG, foreground=SUCCESS_FG)
     s.configure("Warn.TLabel",    background=BG, foreground=WARN_FG)
 
     # ── Buttons ──
+    # NOTE on focuscolor: ttk's "clam" theme draws keyboard focus as a
+    # dotted ring inset just inside the button's own border. The original
+    # theme set focuscolor=ACCENT globally, which was invisible against
+    # the original solid-filled accent buttons (accent-colored dots on an
+    # accent-colored fill). The glow/gradient outline buttons below have a
+    # dark interior, so that same dotted ring lands right on top of the
+    # bold accent-colored label text and reads as broken/cut-off glyphs.
+    # Blending focuscolor into each button's own fill keeps the ring
+    # functional for keyboard users without visually colliding with the
+    # text — classic style is untouched, matching the original look.
     s.configure("TButton",
         background=BG2, foreground=TEXT,
         relief="flat", borderwidth=1,
         padding=(10, 5), font=_UI,
         bordercolor=BORDER)
-    s.map("TButton",
-        background=[("active", HOV_BG), ("pressed", SEL_BG)],
-        bordercolor=[("focus", ACCENT)])
+    if glow:
+        s.configure("TButton", focuscolor=BG2)
+        s.map("TButton",
+            background=[("active", HOV_BG), ("pressed", SEL_BG)],
+            foreground=[("active", ACCENT)],
+            bordercolor=[("focus", ACCENT), ("active", ACCENT)])
+    else:
+        s.map("TButton",
+            background=[("active", HOV_BG), ("pressed", SEL_BG)],
+            bordercolor=[("focus", ACCENT)])
 
-    s.configure("Accent.TButton",
-        background=ACCENT, foreground="white",
-        relief="flat", borderwidth=0,
-        padding=(12, 5), font=_UIb)
-    s.map("Accent.TButton",
-        background=[("active", ACCENT_HOV), ("pressed", ACCENT_ACT)])
+    if glow:
+        # Glow-outline buttons: dark fill, bright bordered text at rest;
+        # invert to a solid glowing fill on hover/press — a terminal
+        # "select to activate" look instead of a flat filled button.
+        s.configure("Accent.TButton",
+            background=FIELD_BG, foreground=ACCENT,
+            relief="solid", borderwidth=1, bordercolor=ACCENT,
+            padding=(12, 5), font=_UIb, focuscolor=FIELD_BG)
+        s.map("Accent.TButton",
+            background=[("pressed", ACCENT_ACT), ("active", ACCENT)],
+            foreground=[("pressed", ACCENT_TEXT), ("active", ACCENT_TEXT)],
+            bordercolor=[("active", ACCENT_HOV)])
+    else:
+        s.configure("Accent.TButton",
+            background=ACCENT, foreground=ACCENT_TEXT,
+            relief="flat", borderwidth=0,
+            padding=(12, 5), font=_UIb)
+        s.map("Accent.TButton",
+            background=[("active", ACCENT_HOV), ("pressed", ACCENT_ACT)])
 
     s.configure("Ghost.TButton",
         background=SIDEBAR_BG, foreground=ACCENT,
-        relief="flat", borderwidth=0, padding=(6, 3))
+        relief="flat", borderwidth=0, padding=(6, 3),
+        focuscolor=(SIDEBAR_BG if glow else ACCENT))
     s.map("Ghost.TButton",
-        background=[("active", HOV_BG)])
+        background=[("active", HOV_BG)],
+        foreground=[("active", ACCENT_HOV)])
 
-    s.configure("Danger.TButton",
-        background=BG2, foreground=ERR_FG,
-        relief="flat", borderwidth=1, padding=(10, 5),
-        bordercolor=BORDER)
-    s.map("Danger.TButton",
-        background=[("active", "#fde7e9")])
+    if glow:
+        s.configure("Danger.TButton",
+            background=FIELD_BG, foreground=ERR_FG,
+            relief="solid", borderwidth=1, padding=(10, 5),
+            bordercolor=ERR_FG, focuscolor=FIELD_BG)
+        s.map("Danger.TButton",
+            background=[("pressed", DANGER_PRESS_BG), ("active", ERR_FG)],
+            foreground=[("pressed", TEXT), ("active", ACCENT_TEXT)],
+            bordercolor=[("active", ERR_FG)])
+    else:
+        s.configure("Danger.TButton",
+            background=BG2, foreground=ERR_FG,
+            relief="flat", borderwidth=1, padding=(10, 5),
+            bordercolor=BORDER)
+        s.map("Danger.TButton",
+            background=[("active", DANGER_HOVER_BG)])
 
     # ── Entry ──
     s.configure("TEntry",
-        fieldbackground="white", foreground=TEXT,
+        fieldbackground=FIELD_BG, foreground=TEXT,
         borderwidth=1, relief="solid",
         padding=(6, 4), bordercolor=BORDER,
-        insertcolor=TEXT)
+        insertcolor=(ACCENT if glow else TEXT))
     s.map("TEntry",
         bordercolor=[("focus", ACCENT)])
 
     # ── Combobox ──
     s.configure("TCombobox",
-        fieldbackground="white", foreground=TEXT,
+        fieldbackground=FIELD_BG, background=FIELD_BG, foreground=TEXT,
+        arrowcolor=TEXT2, selectbackground=FIELD_BG, selectforeground=TEXT,
         borderwidth=1, relief="solid",
         padding=(4, 3), bordercolor=BORDER)
     s.map("TCombobox",
-        bordercolor=[("focus", ACCENT)])
+        bordercolor=[("focus", ACCENT)],
+        fieldbackground=[("readonly", FIELD_BG)],
+        arrowcolor=[("active", ACCENT)])
+    root.option_add("*TCombobox*Listbox.background", FIELD_BG)
+    root.option_add("*TCombobox*Listbox.foreground", TEXT)
+    root.option_add("*TCombobox*Listbox.selectBackground", SEL_BG)
+    root.option_add("*TCombobox*Listbox.selectForeground", TEXT)
 
     # ── Notebook ──
     s.configure("TNotebook",
@@ -122,38 +297,46 @@ def _apply_theme(root: tk.Tk):
         padding=(14, 5), borderwidth=0, font=_UI)
     s.map("TNotebook.Tab",
         background=[("selected", BG),  ("active", HOV_BG)],
-        foreground=[("selected", ACCENT)],
+        foreground=[("selected", ACCENT)] + ([("active", ACCENT)] if glow else []),
         padding=[("selected", (14, 10))],
         expand=[("selected", [0, 0, 0, 2])])
 
     # ── Treeview (file list) ──
     s.configure("Treeview",
-        background="white", fieldbackground="white",
+        background=FIELD_BG, fieldbackground=FIELD_BG,
         foreground=TEXT, rowheight=26,
         borderwidth=0, relief="flat")
     s.configure("Treeview.Heading",
         background=BG2, foreground=TEXT2,
-        relief="flat", padding=(6, 5), font=_UIsm)
+        relief="flat", padding=(6, 5), font=_LABEL)
+    if glow:
+        s.map("Treeview.Heading", foreground=[("active", ACCENT)])
     s.map("Treeview",
         background=[("selected", SEL_BG)],
-        foreground=[("selected", TEXT)])
+        foreground=[("selected", ACCENT if glow else TEXT)])
 
     # ── Sidebar Treeview ──
     s.configure("Sidebar.Treeview",
         background=SIDEBAR_BG, fieldbackground=SIDEBAR_BG,
         foreground=TEXT, rowheight=22, font=_UI,
         borderwidth=0, relief="flat", indent=14)
-    s.map("Sidebar.Treeview",
-        background=[("selected", ACCENT)],
-        foreground=[("selected", "white")])
+    if glow:
+        s.map("Sidebar.Treeview",
+            background=[("selected", SEL_BG)],
+            foreground=[("selected", ACCENT)])
+    else:
+        s.map("Sidebar.Treeview",
+            background=[("selected", ACCENT)],
+            foreground=[("selected", ACCENT_TEXT)])
 
     # ── Scrollbar ──
     s.configure("TScrollbar",
-        background=BG2, troughcolor=BG2,
+        background=BG2, troughcolor=BG,
         borderwidth=0, arrowsize=13,
         relief="flat")
     s.map("TScrollbar",
-        background=[("active", BORDER), ("pressed", TEXT2)])
+        background=[("active", ACCENT if glow else BORDER),
+                     ("pressed", ACCENT_ACT if glow else TEXT2)])
 
     # ── Separator ──
     s.configure("TSeparator", background=BORDER)
@@ -169,6 +352,106 @@ def _apply_theme(root: tk.Tk):
 
 
 # ─────────────────────────────────────────────
+#  Gradient primitives — Tkinter has no native gradient support, so these
+#  hand-draw one on a Canvas. Used only when the active theme's STYLE is
+#  "gradient" (currently just "Aurora"); every other theme ignores them.
+# ─────────────────────────────────────────────
+def _lerp_color(c1: str, c2: str, t: float) -> str:
+    c1, c2 = c1.lstrip("#"), c2.lstrip("#")
+    r1, g1, b1 = int(c1[0:2], 16), int(c1[2:4], 16), int(c1[4:6], 16)
+    r2, g2, b2 = int(c2[0:2], 16), int(c2[2:4], 16), int(c2[4:6], 16)
+    r = round(r1 + (r2 - r1) * t)
+    g = round(g1 + (g2 - g1) * t)
+    b = round(b1 + (b2 - b1) * t)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+class GradientBar(tk.Canvas):
+    """A thin strip filled with a smooth horizontal or vertical gradient —
+    a drop-in replacement for a solid-color accent Frame."""
+    def __init__(self, parent, c1: str, c2: str, vertical: bool = False, **kw):
+        # tk.Canvas defaults to ~200x150px for any dimension the caller
+        # doesn't specify (unlike Frame, it has no content to size itself
+        # from) — callers of GradientBar only ever set the *thickness*
+        # dimension (height for a horizontal bar, width for a vertical
+        # one) and rely on sticky/fill to stretch the other, so default
+        # the unset one to 1px instead of letting it silently balloon
+        # the whole bar (and anything gridded alongside it) to ~200px.
+        kw.setdefault("width", 1)
+        kw.setdefault("height", 1)
+        super().__init__(parent, highlightthickness=0, bd=0, **kw)
+        self._c1, self._c2, self._vertical = c1, c2, vertical
+        self.bind("<Configure>", self._redraw)
+
+    def _redraw(self, _=None):
+        self.delete("grad")
+        w, h = self.winfo_width(), self.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+        if self._vertical:
+            for y in range(h):
+                t = y / max(h - 1, 1)
+                self.create_line(0, y, w, y, fill=_lerp_color(self._c1, self._c2, t), tags="grad")
+        else:
+            for x in range(w):
+                t = x / max(w - 1, 1)
+                self.create_line(x, 0, x, h, fill=_lerp_color(self._c1, self._c2, t), tags="grad")
+        self.tag_lower("grad")   # keep any overlaid text/items on top
+
+
+def _draw_gradient_text(canvas: tk.Canvas, x: int, y: int, text: str,
+                         font, c1: str, c2: str, anchor: str = "nw") -> int:
+    """Draw `text` on `canvas` character-by-character, interpolating fill
+    color left-to-right across the string. Returns the total pixel width."""
+    import tkinter.font as tkfont
+    f = tkfont.Font(font=font)
+    total_w = f.measure(text)
+    cx = x
+    for ch in text:
+        cw = f.measure(ch)
+        t = 0.0 if total_w <= 0 else ((cx - x) + cw / 2) / total_w
+        canvas.create_text(cx, y, text=ch, font=font,
+                            fill=_lerp_color(c1, c2, t), anchor=anchor)
+        cx += cw
+    return total_w
+
+
+class GradientBorderButton(tk.Frame):
+    """A real ttk.Button ringed by a thin gradient border, built from plain
+    grid-managed strips (top/bottom gradient bars, solid left/right edges)
+    rather than embedding the button inside a Canvas. An earlier version
+    used Canvas.create_window() to embed the button and resized it on
+    <Configure> — on Windows that leaves the embedded native button
+    clipped/stale after a resize (the HWND doesn't always repaint), so
+    the button text rendered cut off. Plain grid geometry management
+    sizes the button the normal, reliable way."""
+    def __init__(self, parent, text: str, command, style: str,
+                 c1: str, c2: str, bg: str, thickness: int = 2, **btn_kw):
+        super().__init__(parent, bg=bg)
+        btn = ttk.Button(self, text=text, command=command, style=style, **btn_kw)
+
+        top    = GradientBar(self, c1, c2, height=thickness, bg=bg)
+        bottom = GradientBar(self, c1, c2, height=thickness, bg=bg)
+        left   = tk.Frame(self, bg=c1, width=thickness)
+        right  = tk.Frame(self, bg=c2, width=thickness)
+
+        top.grid(   row=0, column=0, columnspan=3, sticky="ew")
+        left.grid(  row=1, column=0, sticky="ns")
+        # sticky="ew" only (not "nsew") — force-stretching the button
+        # vertically to exactly match the grid row's computed height
+        # clipped the tops of round glyphs ("o" rendering flat-topped)
+        # on displays where that computation rounds a pixel short (seen
+        # at non-100% Windows display scaling). Leaving height alone lets
+        # the button keep its own natural, correctly-measured height.
+        btn.grid(   row=1, column=1, sticky="ew")
+        right.grid( row=1, column=2, sticky="ns")
+        bottom.grid(row=2, column=0, columnspan=3, sticky="ew")
+
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+
+# ─────────────────────────────────────────────
 #  Constants
 # ─────────────────────────────────────────────
 DEFAULT_PORT  = 10022
@@ -176,6 +459,7 @@ DEFAULT_KEY   = r"C:\Users\me\.ssh\tgt"
 APP_DIR       = os.path.join(
     os.environ.get("APPDATA", os.path.expanduser("~")), "SecureSH")
 SESSIONS_FILE = os.path.join(APP_DIR, "sessions.json")
+SETTINGS_FILE = os.path.join(APP_DIR, "settings.json")
 
 FOLDER_PFX  = "folder|"
 SESSION_PFX = "session|"
@@ -202,6 +486,23 @@ def save_sessions(sessions: list[dict]):
 
 
 # ─────────────────────────────────────────────
+#  Settings persistence
+# ─────────────────────────────────────────────
+def load_settings() -> dict:
+    try:
+        with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def save_settings(settings: dict):
+    _ensure_app_dir()
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(settings, f, indent=2)
+
+
+# ─────────────────────────────────────────────
 #  Keyboard-interactive / Duo dialog  (fixed)
 # ─────────────────────────────────────────────
 class KeyboardInteractiveDialog(tk.Toplevel):
@@ -222,13 +523,13 @@ class KeyboardInteractiveDialog(tk.Toplevel):
 
         # ── Instructions box ──────────────────────────
         if instructions and instructions.strip():
-            box = tk.Frame(self, bg="#e8f4fb",
-                           highlightbackground="#b3d7f0",
+            box = tk.Frame(self, bg=INFO_BG,
+                           highlightbackground=INFO_BORDER,
                            highlightthickness=1)
             box.pack(fill="x", padx=16, pady=(16, 8))
             tk.Label(box, text=instructions.strip(),
-                     bg="#e8f4fb", fg=TEXT,
-                     font=("Consolas", 9),
+                     bg=INFO_BG, fg=(ACCENT if _THEME_STYLE == "glow" else TEXT),
+                     font=(_MONO[0], 9),
                      justify="left", wraplength=400,
                      padx=12, pady=10).pack(fill="x")
 
@@ -298,14 +599,20 @@ class ConnectDialog(tk.Toplevel):
         existing_folders = existing_folders or []
 
         # ── Header ───────────────────────────────────
-        hdr = tk.Frame(self, bg=ACCENT, height=48)
-        hdr.pack(fill="x")
-        hdr.pack_propagate(False)
-        tk.Label(hdr,
-                 text="Edit Connection" if prefill else "New Connection",
-                 bg=ACCENT, fg="white",
-                 font=("Segoe UI", 11, "bold")).pack(
-            side="left", padx=16, pady=12)
+        title_text = "Edit Connection" if prefill else "New Connection"
+        if _THEME_STYLE == "gradient":
+            hdr = GradientBar(self, GRADIENT_START, GRADIENT_END, height=48, bg=BG)
+            hdr.pack(fill="x")
+            hdr.create_text(16, 24, text=title_text, fill=ACCENT_TEXT,
+                             font=("Segoe UI", 11, "bold"), anchor="w")
+        else:
+            hdr = tk.Frame(self, bg=ACCENT, height=48)
+            hdr.pack(fill="x")
+            hdr.pack_propagate(False)
+            tk.Label(hdr, text=title_text,
+                     bg=ACCENT, fg=ACCENT_TEXT,
+                     font=("Segoe UI", 11, "bold")).pack(
+                side="left", padx=16, pady=12)
 
         # ── Body ─────────────────────────────────────
         body = ttk.Frame(self)
@@ -466,11 +773,22 @@ class SessionsSidebar(tk.Frame):
         # Header row
         hdr = tk.Frame(self, bg=SIDEBAR_BG)
         hdr.pack(fill="x", padx=10, pady=(12, 4))
-        tk.Label(hdr, text="SESSIONS", bg=SIDEBAR_BG,
-                 fg=TEXT2, font=("Segoe UI", 8, "bold")).pack(side="left")
+        if _THEME_STYLE == "gradient":
+            import tkinter.font as tkfont
+            tf = tkfont.Font(font=_LABELb)
+            tw, th = tf.measure("SESSIONS"), tf.metrics("linespace")
+            hdr_canvas = tk.Canvas(hdr, width=tw, height=th, bg=SIDEBAR_BG,
+                                    highlightthickness=0, bd=0)
+            _draw_gradient_text(hdr_canvas, 0, 0, "SESSIONS", _LABELb,
+                                 GRADIENT_START, GRADIENT_END, anchor="nw")
+            hdr_canvas.pack(side="left")
+        else:
+            tk.Label(hdr, text="SESSIONS", bg=SIDEBAR_BG,
+                     fg=(ACCENT if _THEME_STYLE == "glow" else TEXT2),
+                     font=_LABELb).pack(side="left")
         tk.Button(hdr, text="+ New", bg=SIDEBAR_BG, fg=ACCENT,
                   bd=0, relief="flat", cursor="hand2",
-                  font=("Segoe UI", 8, "bold"),
+                  font=_LABELb,
                   activebackground=SIDEBAR_BG, activeforeground=ACCENT_HOV,
                   command=self.on_new).pack(side="right")
 
@@ -512,9 +830,12 @@ class SessionsSidebar(tk.Frame):
         ]
         for i, (label, cmd, style) in enumerate(btns):
             r, c = divmod(i, 2)
-            ttk.Button(grid, text=label, command=cmd,
-                       style=style).grid(
-                row=r, column=c, padx=2, pady=2, sticky="ew")
+            if _THEME_STYLE == "gradient" and style == "Accent.TButton":
+                btn = GradientBorderButton(grid, label, cmd, style,
+                                            GRADIENT_START, GRADIENT_END, bg=SIDEBAR_BG)
+            else:
+                btn = ttk.Button(grid, text=label, command=cmd, style=style)
+            btn.grid(row=r, column=c, padx=2, pady=2, sticky="ew")
         grid.columnconfigure(0, weight=1)
         grid.columnconfigure(1, weight=1)
 
@@ -865,7 +1186,7 @@ class SSHTerminal(tk.Frame):
             bg=TERM_BG, fg=TERM_FG,
             font=_MONO,
             insertwidth=0,
-            selectbackground="#264f78",
+            selectbackground=TERM_SEL_BG,
             selectforeground=TERM_FG,
             wrap="none", cursor="xterm",
             relief="flat", bd=0,
@@ -873,8 +1194,10 @@ class SSHTerminal(tk.Frame):
         )
         vsb = ttk.Scrollbar(self, orient="vertical", command=self.text.yview)
         self.text.configure(yscrollcommand=vsb.set)
-        self.text.pack(side="left", fill="both", expand=True)
+        # Small gutter so the scrollbar isn't flush against the window edge.
+        tk.Frame(self, bg=TERM_BG, width=4).pack(side="right", fill="y")
         vsb.pack(side="right", fill="y")
+        self.text.pack(side="left", fill="both", expand=True)
 
         # Pre-allocate active screen rows in the Text widget
         self.text.insert("1.0", "\n" * (TERM_ROWS - 1))
@@ -1344,24 +1667,39 @@ class SecureSHApp(tk.Tk):
         status = tk.Frame(self, bg=BG2, height=24)
         status.pack(fill="x", side="bottom")
         status.pack_propagate(False)
-        tk.Frame(status, bg=ACCENT, width=3).pack(side="left", fill="y")
+        if _THEME_STYLE == "gradient":
+            GradientBar(status, GRADIENT_START, GRADIENT_END, vertical=True,
+                        width=3, bg=BG2).pack(side="left", fill="y")
+        else:
+            tk.Frame(status, bg=ACCENT, width=3).pack(side="left", fill="y")
         tk.Label(status, textvariable=self.status_var,
                  bg=BG2, fg=TEXT2, font=_UIsm,
                  anchor="w").pack(side="left", padx=8)
 
-        # Paned layout
+        # Paned layout — sashwidth wide enough to grab & drag comfortably
+        # (a 1px sash is technically draggable but nearly impossible to
+        # grab with a mouse), so the sidebar can be widened for long
+        # server names.
         pane = tk.PanedWindow(self, orient="horizontal",
-                              sashwidth=1, sashrelief="flat",
-                              bg=BORDER, bd=0)
+                              sashwidth=6, sashrelief="flat",
+                              bg=BORDER, bd=0, opaqueresize=True)
         pane.pack(fill="both", expand=True)
 
         self.sidebar  = SessionsSidebar(pane,
                                         on_connect=self._connect_with,
                                         on_new=self._connect)
-        self.notebook = ttk.Notebook(pane)
+
+        # Wrap the notebook so there's a small margin before the window's
+        # right edge (previously content ran flush to it) — applies to
+        # every tab, not just an active terminal.
+        content_wrap = tk.Frame(pane, bg=BG)
+        self.notebook = ttk.Notebook(content_wrap)
         self.notebook.bind("<Button-3>", self._on_tab_right_click)
-        pane.add(self.sidebar,  minsize=180, width=200)
-        pane.add(self.notebook, minsize=500)
+        self.notebook.pack(side="left", fill="both", expand=True)
+        tk.Frame(content_wrap, bg=BG, width=6).pack(side="right", fill="y")
+
+        pane.add(self.sidebar,     minsize=180, width=200)
+        pane.add(content_wrap,     minsize=500)
 
         self._welcome()
 
@@ -1387,21 +1725,42 @@ class SecureSHApp(tk.Tk):
                          command=lambda: self.sidebar._import())
         mb.add_cascade(label="Sessions", menu=sess)
 
+        self._theme_var = tk.StringVar(value=CURRENT_THEME)
+        theme_menu = tk.Menu(mb, tearoff=0)
+        for name in THEMES:
+            theme_menu.add_radiobutton(
+                label=name, value=name, variable=self._theme_var,
+                command=lambda n=name: self._change_theme(n))
+        mb.add_cascade(label="Theme", menu=theme_menu)
+
         self.bind_all("<Control-n>", lambda _: self._connect())
         self.bind_all("<Control-d>", lambda _: self._disconnect_active())
         self.bind_all("<Control-w>", lambda _: self._disconnect_active())
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_titlebar(self):
-        bar = tk.Frame(self, bg=BG2, height=42)
+        # height=48, not 42: the gradient theme's New Connection button
+        # (GradientBorderButton) is a couple pixels taller than a plain
+        # ttk.Button — its own hand-drawn border adds to the button's
+        # natural height. At 42 + pack_propagate(False) that overflow
+        # got clipped by the fixed-height frame, shaving the tops off
+        # round glyphs ("o" rendering flat). 48 gives every theme's
+        # button comfortable headroom regardless.
+        bar = tk.Frame(self, bg=BG2, height=48)
         bar.pack(fill="x", side="top")
         bar.pack_propagate(False)
 
-        tk.Frame(bar, bg=ACCENT, width=4).pack(side="left", fill="y")
-
-        ttk.Button(bar, text="New Connection",
-                   command=self._connect,
-                   style="Accent.TButton").pack(side="left", padx=8, pady=6)
+        if _THEME_STYLE == "gradient":
+            GradientBar(bar, GRADIENT_START, GRADIENT_END, vertical=True,
+                        width=4, bg=BG2).pack(side="left", fill="y")
+            GradientBorderButton(bar, "New Connection", self._connect,
+                                  "Accent.TButton", GRADIENT_START, GRADIENT_END,
+                                  bg=BG2).pack(side="left", padx=8, pady=6)
+        else:
+            tk.Frame(bar, bg=ACCENT, width=4).pack(side="left", fill="y")
+            ttk.Button(bar, text="New Connection",
+                       command=self._connect,
+                       style="Accent.TButton").pack(side="left", padx=8, pady=6)
         ttk.Button(bar, text="Disconnect",
                    command=self._disconnect_active).pack(
             side="left", pady=6)
@@ -1415,13 +1774,29 @@ class SecureSHApp(tk.Tk):
 
     def _welcome(self):
         f = tk.Frame(self.notebook, bg=BG)
-        tk.Label(f, text="SecureSH",
-                 bg=BG, fg=ACCENT,
-                 font=("Segoe UI", 28, "bold")).pack(pady=(80, 4))
+        if _WELCOME_CURSOR:
+            title, title_font = "SecureSH_", (_MONO[0], 30, "bold")
+            info_font, info_text = _MONO, f"default port {DEFAULT_PORT}  ·  key {DEFAULT_KEY}"
+        else:
+            title, title_font = "SecureSH", ("Segoe UI", 28, "bold")
+            info_font, info_text = _UIsm, f"Default port {DEFAULT_PORT}  ·  Key  {DEFAULT_KEY}"
+        if _THEME_STYLE == "gradient":
+            import tkinter.font as tkfont
+            tf = tkfont.Font(font=title_font)
+            tw, th = tf.measure(title), tf.metrics("linespace")
+            title_canvas = tk.Canvas(f, width=tw, height=th, bg=BG,
+                                      highlightthickness=0, bd=0)
+            _draw_gradient_text(title_canvas, 0, 0, title, title_font,
+                                 GRADIENT_START, GRADIENT_END, anchor="nw")
+            title_canvas.pack(pady=(80, 4))
+        else:
+            tk.Label(f, text=title,
+                     bg=BG, fg=ACCENT,
+                     font=title_font).pack(pady=(80, 4))
         tk.Label(f, text="Double-click a saved session  •  Ctrl+N for a new connection",
                  bg=BG, fg=TEXT2, font=("Segoe UI", 10)).pack()
-        tk.Label(f, text=f"Default port {DEFAULT_PORT}  ·  Key  {DEFAULT_KEY}",
-                 bg=BG, fg=TEXT2, font=_UIsm).pack(pady=4)
+        tk.Label(f, text=info_text,
+                 bg=BG, fg=TEXT2, font=info_font).pack(pady=6)
         self.notebook.add(f, text="  Welcome  ")
         self._welcome_tab = self.notebook.tabs()[-1]
 
@@ -1593,6 +1968,27 @@ class SecureSHApp(tk.Tk):
                 except Exception: pass
         self.destroy()
 
+    def _change_theme(self, name: str):
+        if name == CURRENT_THEME:
+            return
+        settings = load_settings()
+        settings["theme"] = name
+        save_settings(settings)
+
+        msg = f'Theme set to "{name}".\n\nRestart SecureSH now to apply it?'
+        if self._tab_handles:
+            msg = (f'Theme set to "{name}".\n\n'
+                   "You have active session(s) — restarting now will "
+                   "disconnect them.\n\nRestart SecureSH now to apply it?")
+        if not messagebox.askyesno("Theme Changed", msg, parent=self):
+            return
+
+        if getattr(sys, "frozen", False):
+            subprocess.Popen([sys.executable] + sys.argv[1:])
+        else:
+            subprocess.Popen([sys.executable, os.path.abspath(__file__)] + sys.argv[1:])
+        self._on_close()
+
 
 # ─────────────────────────────────────────────
 #  Helpers
@@ -1623,5 +2019,6 @@ def _fmt_size(n: int) -> str:
 
 # ─────────────────────────────────────────────
 if __name__ == "__main__":
+    _activate_theme(load_settings().get("theme", DEFAULT_THEME))
     app = SecureSHApp()
     app.mainloop()
