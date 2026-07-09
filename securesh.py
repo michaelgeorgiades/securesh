@@ -875,7 +875,9 @@ class SessionsSidebar(tk.Frame):
 
         visible = sorted(self._sessions, key=lambda x: x["name"].lower())
         if query:
-            visible = [s for s in visible if query in s["name"].lower()]
+            visible = [s for s in visible
+                       if query in s["name"].lower()
+                       or query in s.get("host", "").lower()]
 
         # Only show folders that contain at least one visible session
         folders = sorted({s["folder"] for s in visible if s.get("folder")})
